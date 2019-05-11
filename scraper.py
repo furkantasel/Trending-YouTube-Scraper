@@ -1,4 +1,4 @@
-import requests, sys, time, os, argparse
+import requests, sys, time, os, argparse, json
 
 # List of simple to collect features
 snippet_features = ["title",
@@ -16,14 +16,17 @@ header = ["video_id"] + snippet_features + ["trending_date", "tags", "view_count
                                             "ratings_disabled", "description"]
 
 
-def setup(api_path, code_path):
+def setup(api_path, code_path, category_path):
     with open(api_path, 'r') as file:
         api_key = file.readline()
 
     with open(code_path) as file:
         country_codes = [x.rstrip() for x in file]
 
-    return api_key, country_codes
+    with open(category_path) as file:
+        category_ids = [x.rstrip() for x in file]
+
+    return api_key, country_codes, category_ids
 
 
 def prepare_feature(feature):
@@ -33,9 +36,9 @@ def prepare_feature(feature):
     return f'"{feature}"'
 
 
-def api_request(page_token, country_code):
+def api_request(page_token, country_code, category_id):
     # Builds the URL and requests the JSON from it
-    request_url = f"https://www.googleapis.com/youtube/v3/videos?part=id,statistics,snippet{page_token}chart=mostPopular&regionCode={country_code}&maxResults=50&key={api_key}"
+    request_url = f"https://www.googleapis.com/youtube/v3/videos?part=id,statistics,snippet{page_token}chart=mostPopular&regionCode={country_code}&maxResults=50&videoCategoryId={category_id}&key={api_key}"
     request = requests.get(request_url)
     if request.status_code == 429:
         print("Temp-Banned due to excess requests, please wait and continue later")
@@ -100,15 +103,15 @@ def get_videos(items):
     return lines
 
 
-def get_pages(country_code, next_page_token="&"):
+def get_pages(country_code, category_id, next_page_token="&"):
     country_data = []
 
     # Because the API uses page tokens (which are literally just the same function of numbers everywhere) it is much
     # more inconvenient to iterate over pages, but that is what is done here.
     while next_page_token is not None:
         # A page of data i.e. a list of videos and all needed data
-        video_data_page = api_request(next_page_token, country_code)
-
+        video_data_page = api_request(next_page_token, country_code, category_id)
+        print(json.dumps(video_data_page))
         # Get the next page token and build a string which can be injected into the request with it, unless it's None,
         # then let the whole thing be None so that the loop ends after this cycle
         next_page_token = video_data_page.get("nextPageToken", None)
@@ -121,22 +124,23 @@ def get_pages(country_code, next_page_token="&"):
     return country_data
 
 
-def write_to_file(country_code, country_data):
+def write_to_file(country_code, country_data, category_id):
 
     print(f"Writing {country_code} data to file...")
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    with open(f"{output_dir}/{time.strftime('%y.%d.%m')}_{country_code}_videos.csv", "w+", encoding='utf-8') as file:
+    with open(f"{output_dir}/{time.strftime('%y.%d.%m')}_{country_code}_{category_id}_videos.csv", "w+", encoding='utf-8') as file:
         for row in country_data:
             file.write(f"{row}\n")
 
 
 def get_data():
     for country_code in country_codes:
-        country_data = [",".join(header)] + get_pages(country_code)
-        write_to_file(country_code, country_data)
+        for category_id in category_ids:
+            country_data = [",".join(header)] + get_pages(country_code, category_id)
+            write_to_file(country_code, country_data, category_id)
 
 
 if __name__ == "__main__":
@@ -144,11 +148,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--key_path', help='Path to the file containing the api key, by default will use api_key.txt in the same directory', default='api_key.txt')
     parser.add_argument('--country_code_path', help='Path to the file containing the list of country codes to scrape, by default will use country_codes.txt in the same directory', default='country_codes.txt')
+    parser.add_argument('--category_id_path', help='Path to the file containing the list of category ids to scrape, by default will use category_ids.txt in the same directory', default='category_ids.txt')
     parser.add_argument('--output_dir', help='Path to save the outputted files in', default='output/')
 
     args = parser.parse_args()
 
     output_dir = args.output_dir
-    api_key, country_codes = setup(args.key_path, args.country_code_path)
+    api_key, country_codes, category_ids = setup(args.key_path, args.country_code_path, args.category_id_path)
 
     get_data()
